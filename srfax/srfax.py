@@ -4,19 +4,18 @@
 '''SRFax (www.srfax.com) python library'''
 
 import re
-import json
 import os.path
 import base64
 import logging
 
-import suds
+import requests
 
 
-URL = 'https://www.srfax.com/SRF_UserFaxWebSrv.php?wsdl'
+URL = 'https://www.srfax.com/SRF_SecWebSvc.php'
 
 LOGGER = logging.getLogger(__name__)
 
-RE_E164 = re.compile(r'^\+\d{7,15}$')
+RE_E164 = re.compile(r'^\+\d{7,15}$')  # TODO: Replace this with phonenumberslite?
 RE_NANP = re.compile(r'^\+1')
 
 
@@ -29,7 +28,9 @@ class SRFaxError(Exception):
         self.cause = cause
         self.retry = retry
         super(SRFaxError, self).__init__(error_code, message, cause, retry)
-        LOGGER.exception("%s" % (self))
+
+        # TODO: In Python3.4, this causes 'AttributeError: 'NoneType' object has no attribute '__context__''
+        # LOGGER.exception("%s" % (self))
 
     def get_error_code(self):
         '''Get exception error code'''
@@ -56,7 +57,6 @@ class SRFax(object):
         self.sender_email = sender_email
         self.account_code = account_code
         self.url = url or URL
-        self.client = suds.client.Client(self.url)
 
     def queue_fax(self, to_fax_number, filepath,
                   caller_id=None, sender_email=None, account_code=None):
@@ -66,8 +66,12 @@ class SRFax(object):
         fax_type = 'BROADCAST' if len(to_fax_number) > 1 else 'SINGLE'
         to_fax_number = '|'.join(to_fax_number)
 
-        if isinstance(filepath, basestring):
-            filepath = [filepath]
+        try:
+            if isinstance(filepath, basestring):
+                filepath = [filepath]
+        except NameError:
+            if isinstance(filepath, str):
+                filepath = [filepath]
         if not isinstance(filepath, list):
             raise TypeError('filepath not properly defined')
         if len(filepath) > 5:
@@ -87,10 +91,14 @@ class SRFax(object):
         for i in range(len(filepath)):
             path = filepath[i]
             basename = os.path.basename(path)
-            if not isinstance(basename, unicode):
+            if not isinstance(basename, str):
                 basename = basename.decode('utf-8')
             params['sFileName_%d' % (i + 1)] = basename
-            params['sFileContent_%d' % (i + 1)] = SRFax.get_file_content(path)
+
+            content = SRFax.get_file_content(path)
+            if not isinstance(content, str):
+                content = content.decode()
+            params['sFileContent_%d' % (i + 1)] = content
 
         return self.process_request('Queue_Fax', params)
 
@@ -100,7 +108,7 @@ class SRFax(object):
         params = {
             'access_id': self.access_id,
             'access_pwd': self.access_pwd,
-            'sFaxDetailID': fax_id,
+            'sFaxDetailsID': fax_id,
         }
         SRFax.verify_parameters(params)
 
@@ -133,14 +141,16 @@ class SRFax(object):
 
         return self.process_request('Get_Fax_Outbox', params)
 
-    def retrieve_fax(self, fax_filename, folder):
+    def retrieve_fax(self, fax_filename, folder, fax_id):
         '''Retrieve fax content in Base64 format'''
+        assert folder in ['IN', 'OUT']
 
         params = {
             'access_id': self.access_id,
             'access_pwd': self.access_pwd,
             'sFaxFileName': fax_filename,
             'sDirection': folder,
+            'sFaxDetailsID': fax_id
         }
         SRFax.verify_parameters(params)
 
@@ -151,6 +161,7 @@ class SRFax(object):
 
     def delete_fax(self, fax_filename, folder):
         '''Delete fax files from server'''
+        assert folder in ['IN', 'OUT']
 
         if isinstance(fax_filename, str):
             fax_filename = [fax_filename]
@@ -174,11 +185,11 @@ class SRFax(object):
     def process_request(self, method, params):
         '''Process SRFax SOAP request'''
 
-        method = getattr(self.client.service, method)
+        params['action'] = method
         try:
-            response = method(**params)  # pylint: disable-msg=W0142
+            response = requests.post(self.url, json=params)
         except Exception as exc:
-            raise SRFaxError('REQUESTFAILED', 'SOAP request failed',
+            raise SRFaxError('REQUESTFAILED', 'REST request failed',
                              cause=exc, retry=True)
 
         return SRFax.process_response(response)
@@ -189,41 +200,29 @@ class SRFax(object):
 
         if not response:
             raise SRFaxError('INVALIDRESPONSE', 'Empty response', retry=True)
-        if 'Status' not in response or 'Result' not in response:
-            raise SRFaxError('INVALIDRESPONSE',
-                             'Status and/or Result not in response: %s'
-                             % (response), retry=True)
 
-        result = response['Result']
-        try:
-            if isinstance(result, list):
-                for i in range(len(result)):
-                    if not result[i]:
-                        continue
-                    if isinstance(result[i], suds.sax.text.Text):
-                        result[i] = str(result[i])
-                    else:
-                        result[i] = json.loads(json.dumps(dict(result[i])))
-            elif isinstance(result, suds.sax.text.Text):
-                result = str(result)
-        except Exception as exc:
-            raise SRFaxError('INVALIDRESPONSE',
-                             'Error converting SOAP response',
-                             cause=exc, retry=True)
+        if response.ok:  # TODO: What if it isn't??
+            response = response.json()
+            if 'Status' not in response or 'Result' not in response:
+                raise SRFaxError('INVALIDRESPONSE',
+                                 'Status and/or Result not in response: %s'
+                                 % (response), retry=True)
 
-        LOGGER.debug('Result: %s' % (result))
+            result = response['Result']
 
-        if response['Status'] != 'Success':
-            errmsg = result
-            if (isinstance(errmsg, list) and len(errmsg) == 1
-                    and 'ErrorCode' in errmsg[0]):
-                errmsg = errmsg[0]['ErrorCode']
-            raise SRFaxError('REQUESTFAILED', errmsg)
+            LOGGER.debug('Result: %s' % (result))
 
-        if result is None:
-            result = True
+            if response['Status'] != 'Success':
+                errmsg = result
+                if (isinstance(errmsg, list) and len(errmsg) == 1
+                        and 'ErrorCode' in errmsg[0]):
+                    errmsg = errmsg[0]['ErrorCode']
+                raise SRFaxError('REQUESTFAILED', errmsg)
 
-        return result
+            if result is None:
+                result = True
+
+            return result
 
     @staticmethod
     def verify_parameters(params):
@@ -253,8 +252,13 @@ class SRFax(object):
     def verify_fax_numbers(to_fax_number):
         '''Verify and prepare fax numbers for use at SRFax'''
 
-        if isinstance(to_fax_number, basestring):
-            to_fax_number = [to_fax_number]
+        try:
+            if isinstance(to_fax_number, basestring):
+                to_fax_number = [to_fax_number]
+        except NameError:
+            if isinstance(to_fax_number, str):
+                to_fax_number = [to_fax_number]
+
         if not isinstance(to_fax_number, list):
             raise TypeError('to_fax_number not properly defined')
 
