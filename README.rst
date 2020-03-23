@@ -36,12 +36,21 @@ Example Usage
 
     from srfax import srfax
 
-    srfax_client = srfax.SRFax(<SRFAX_ACCESS_ID>,
-                               <SRFAX_ACCESS_PWD>,
-                               caller_id=<SRFAX_CALLER_ID>,
-                               sender_email=<SRFAX_SENDER_EMAIL>)
+    srfax_client = srfax.SRFax('194999',               # Account Number
+                               'psswrd',               # Text password
+                               caller_id='8005552222', # 10 digits, no prefix
+                               sender_email='user@example.com',
+                               cover_page='Standard',
+                               fax_from_header='up to 30 characters',
+                               senders_name='Benjamin Banneker',
+                               organization='Example Company, LLC')
 
-    fax_id = srfax_client.queue_fax('+11234567', '/path/to/fax/file')
+    fax_id = srfax_client.queue_fax(
+        '+18885551111', '/path/to/fax/file', # Note the +1 prefix on fax number
+        recipients_name='Mary',
+        subject='Sending line of text fax',
+        body_text='Hello world!'
+    )
     status = srfax_client.get_fax_status(fax_id)
         
 
