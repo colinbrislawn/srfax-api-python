@@ -49,7 +49,9 @@ class SRFax(object):
     '''SRFax class'''
 
     def __init__(self, access_id, access_pwd, caller_id=None,
-                 sender_email=None, account_code=None, url=None):
+                 sender_email=None, account_code=None, url=None,
+                 cover_page=None,fax_from_header=None,senders_name=None,
+                 organization=None):
 
         self.access_id = access_id
         self.access_pwd = access_pwd
@@ -57,12 +59,14 @@ class SRFax(object):
         self.sender_email = sender_email
         self.account_code = account_code
         self.url = url or URL
+        self.cover_page = cover_page
+        self.fax_from_header = fax_from_header
+        self.senders_name = senders_name
+        self.organization = organization
 
     def queue_fax(self, to_fax_number, filepath,
                   caller_id=None, sender_email=None, account_code=None,
-                  cover_page=None,
-                  fax_from_header=None,
-                  senders_name=None,
+                  cover_page=None, fax_from_header=None,senders_name=None,
                   recipients_name=None,
                   organization=None,
                   subject=None,
@@ -92,11 +96,11 @@ class SRFax(object):
             'sFaxType': fax_type,
             'sToFaxNumber': to_fax_number,
             'sAccountCode': account_code or self.account_code or '',
-            'sCoverPage': cover_page or 'Standard',
-            'sFaxFromHeader': fax_from_header or '',
-            'sCPFromName': senders_name or '',
+            'sCoverPage': cover_page or self.cover_page or 'Standard',
+            'sFaxFromHeader': fax_from_header or self.fax_from_header or '',
+            'sCPFromName': senders_name or self.senders_name or '',
             'sCPToName': recipients_name or '',
-            'sCPOrganization': organization or '',
+            'sCPOrganization': organization or self.organization or '',
             'sCPSubject': subject or '',
             'sCPComments': body_text or ''
         }
