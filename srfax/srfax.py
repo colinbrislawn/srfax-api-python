@@ -59,7 +59,14 @@ class SRFax(object):
         self.url = url or URL
 
     def queue_fax(self, to_fax_number, filepath,
-                  caller_id=None, sender_email=None, account_code=None):
+                  caller_id=None, sender_email=None, account_code=None,
+                  cover_page=None,
+                  fax_from_header=None,
+                  senders_name=None,
+                  recipients_name=None,
+                  organization=None,
+                  subject=None,
+                  body_text=None):
         '''Queue fax for sending'''
 
         to_fax_number = SRFax.verify_fax_numbers(to_fax_number)
@@ -85,6 +92,13 @@ class SRFax(object):
             'sFaxType': fax_type,
             'sToFaxNumber': to_fax_number,
             'sAccountCode': account_code or self.account_code or '',
+            'sCoverPage': cover_page or 'Standard',
+            'sFaxFromHeader': fax_from_header or '',
+            'sCPFromName': senders_name or '',
+            'sCPToName': recipients_name or '',
+            'sCPOrganization': organization or '',
+            'sCPSubject': subject or '',
+            'sCPComments': body_text or ''
         }
         SRFax.verify_parameters(params)
 
